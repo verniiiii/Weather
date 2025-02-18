@@ -45,6 +45,7 @@ dependencies {
     implementation ("androidx.room:room-runtime:2.6.1")
     implementation(libs.androidx.recyclerview)
     implementation(libs.play.services.location)
+    implementation(libs.litert.support.api)
     kapt ("androidx.room:room-compiler:2.6.1")
     implementation ("androidx.room:room-ktx:2.6.1")
 
@@ -63,6 +64,10 @@ dependencies {
     implementation ("com.squareup.okhttp3:okhttp:4.10.0")
 
     implementation ("com.squareup.okhttp3:logging-interceptor:4.9.3")
+
+    val koin_version = "4.0.2"
+    implementation("io.insert-koin:koin-core:$koin_version")
+    implementation("io.insert-koin:koin-androidx-compose-navigation:$koin_version")
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

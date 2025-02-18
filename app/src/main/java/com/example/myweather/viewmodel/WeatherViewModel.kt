@@ -1,20 +1,17 @@
 package com.example.myweather.viewmodel
 
-import android.app.Application
 import android.content.Context
-import android.util.Log
 import android.widget.Toast
-import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myweather.data.City
-import com.example.myweather.data.CityDao
-import com.example.myweather.data.Month
-import com.example.myweather.data.Season
+import com.example.myweather.data.dao.CityDao
+import com.example.myweather.constants.Month
+import com.example.myweather.constants.Season
 import com.example.myweather.data.Temperature
-import com.example.myweather.data.TemperatureDao
-import com.example.myweather.data.WeatherDatabase
+import com.example.myweather.data.dao.TemperatureDao
 import com.example.myweather.decorator.BasicTemperatureCalculator
 import com.example.myweather.decorator.TemperatureLoggerDecorator
 import com.example.myweather.factory.CityTypeFactory
@@ -27,10 +24,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class WeatherViewModel(application: Application) : AndroidViewModel(application) {
-    private val cityDao: CityDao
-    private val temperatureDao: TemperatureDao
-    private val context = application.applicationContext
+class WeatherViewModel(private val context: Context,
+                       private val cityDao: CityDao,
+                       private val temperatureDao: TemperatureDao
+    //temperatureDao = db.temperatureDao()
+    ) : ViewModel() {
+
     private val cityTypeFactory: CityTypeFactory = DefaultCityTypeFactory()
     private val temperatureCalculator = TemperatureLoggerDecorator(BasicTemperatureCalculator())
 
@@ -57,9 +56,9 @@ class WeatherViewModel(application: Application) : AndroidViewModel(application)
     init {
         _selectedTemperatureFormat.value = "Цельсий" // Установите начальный формат
         _temperatureFormat.value = CelsiusFormatStrategy() // Установите начальный формат
-        val db = WeatherDatabase.getDatabase(application)
-        cityDao = db.cityDao()
-        temperatureDao = db.temperatureDao()
+        //val db = WeatherDatabase.getDatabase(application)
+        //cityDao = db.cityDao()
+        //temperatureDao = db.temperatureDao()
         loadCities()
     }
 

@@ -1,9 +1,7 @@
-package com.example.myweather.data
+package com.example.myweather.network
 
 import FeatureMember
 import android.util.Log
-import com.example.myweather.network.RetrofitClient
-import com.example.myweather.network.YandexGeocoderApi
 
 class GeocoderRepository {
     private val api = RetrofitClient.yandexGeocoderApi

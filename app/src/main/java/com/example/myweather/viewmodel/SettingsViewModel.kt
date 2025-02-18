@@ -9,24 +9,25 @@ import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import com.example.myweather.data.City
-import com.example.myweather.data.CityDao
+import com.example.myweather.data.dao.CityDao
 import com.example.myweather.data.Temperature
-import com.example.myweather.data.TemperatureDao
-import com.example.myweather.data.WeatherDatabase
+import com.example.myweather.data.dao.TemperatureDao
 import kotlinx.coroutines.launch
 
-class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val cityDao: CityDao
-    private val temperatureDao: TemperatureDao
+class SettingsViewModel(application: Application,
+                        private val cityDao: CityDao,
+                        private val temperatureDao: TemperatureDao
+) : AndroidViewModel(application) {
+
     private val context: Context = application.applicationContext
 
     private val _cities = MutableLiveData<List<City>>()
     val cities: LiveData<List<City>> get() = _cities
 
     init {
-        val db = WeatherDatabase.getDatabase(application)
-        cityDao = db.cityDao()
-        temperatureDao = db.temperatureDao()
+//        val db = WeatherDatabase.getDatabase(application)
+//        cityDao = db.cityDao()
+//        temperatureDao = db.temperatureDao()
         loadCities()
     }
 
