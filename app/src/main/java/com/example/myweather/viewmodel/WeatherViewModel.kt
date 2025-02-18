@@ -1,49 +1,264 @@
 package com.example.myweather.viewmodel
 
+import android.app.Application
+import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.example.myweather.data.City
+import com.example.myweather.data.CityDao
+import com.example.myweather.data.Month
+import com.example.myweather.data.Season
+import com.example.myweather.data.Temperature
+import com.example.myweather.data.TemperatureDao
+import com.example.myweather.data.WeatherDatabase
+import com.example.myweather.decorator.BasicTemperatureCalculator
+import com.example.myweather.decorator.TemperatureLoggerDecorator
+import com.example.myweather.factory.CityTypeFactory
+import com.example.myweather.factory.DefaultCityTypeFactory
+import com.example.myweather.strategy.CelsiusFormatStrategy
+import com.example.myweather.strategy.FahrenheitFormatStrategy
+import com.example.myweather.strategy.KelvinFormatStrategy
+import com.example.myweather.strategy.TemperatureFormatStrategy
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-class WeatherViewModel: ViewModel() {
-    private val _selectedCity = MutableLiveData<String>()
+class WeatherViewModel(application: Application) : AndroidViewModel(application) {
+    private val cityDao: CityDao
+    private val temperatureDao: TemperatureDao
+    private val context = application.applicationContext
+    private val cityTypeFactory: CityTypeFactory = DefaultCityTypeFactory()
+    private val temperatureCalculator = TemperatureLoggerDecorator(BasicTemperatureCalculator())
+
+
+    private val _selectedCity = MutableLiveData<City>()
     private val _selectedSeason = MutableLiveData<String>()
 
-    val cityType: LiveData<String> = MutableLiveData()
-    val averageTemperature: LiveData<String> = MutableLiveData()
+    val cityType: LiveData<String> = MutableLiveData<String>()
+    private val _averageTemperature = MutableLiveData<Double>()
+    val averageTemperature: LiveData<String> = MutableLiveData<String>()
+    private val _cities = MutableLiveData<List<City>>()
+    val cities: LiveData<List<City>> get() = _cities
+    private val _seasons = MutableLiveData<List<String>>()
+    val seasons: LiveData<List<String>> get() = _seasons
+    val selectedSeason: LiveData<String> = _selectedSeason
+    val selectedCity: LiveData<City> = _selectedCity
 
-    fun selectCity(cityName: String){
-        _selectedCity.value = cityName
-        updateCityInfo(cityName)
+    private val _temperatureFormat = MutableLiveData<TemperatureFormatStrategy>()
+    val temperatureFormat: LiveData<TemperatureFormatStrategy> get() = _temperatureFormat
+
+    private val _selectedTemperatureFormat = MutableLiveData<String>()
+    val selectedTemperatureFormat: LiveData<String> get() = _selectedTemperatureFormat
+
+    init {
+        _selectedTemperatureFormat.value = "Цельсий" // Установите начальный формат
+        _temperatureFormat.value = CelsiusFormatStrategy() // Установите начальный формат
+        val db = WeatherDatabase.getDatabase(application)
+        cityDao = db.cityDao()
+        temperatureDao = db.temperatureDao()
+        loadCities()
     }
 
-    fun selectSeason(seasonName: String){
+    private fun loadCities() {
+        viewModelScope.launch {
+            val cities = cityDao.getAllCities().map { city ->
+                val type = cityTypeFactory.getCityType(city.name)
+                city.copy(type = type ?: city.type) // Если тип null, оставляем текущий тип
+            }
+            _cities.value = cities
+        }
+    }
+
+    fun selectCity(cityName: String) {
+        viewModelScope.launch {
+            val city = cityDao.getCityByName(cityName)
+            if (city != null) {
+                _selectedCity.value = city!!
+                updateCityInfo(city)
+                loadSeasonsForCity(city.id) // Загрузка сезонов для выбранного города
+                resetSeasonSelection() // Сброс выбора сезона
+            } else {
+                Toast.makeText(context, "Город не найден", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun selectSeason(seasonName: String) {
         _selectedSeason.value = seasonName
         updateTemperatureInfo(_selectedCity.value, seasonName)
     }
 
-    fun saveCitySettings(cityName: String, cityType: String, juneTemp: Double?, julyTemp: Double?, augustTemp: Double?){
-        //Сохранить настройки города в базе данных или другом хранилище
-        //Обновить LiveData для отображения новых данных
-        (this.cityType as MutableLiveData).value = cityType
-        val averageTemp = ((juneTemp ?: 0.0) + (julyTemp ?: 0.0) + (augustTemp ?: 0.0)) / 3
-        (averageTemperature as MutableLiveData).value = "$averageTemp°C"
+    fun setTemperatureFormat(format: TemperatureFormatStrategy) {
+        _temperatureFormat.value = format
+        _selectedTemperatureFormat.value = when (format) {
+            is CelsiusFormatStrategy -> "Цельсий"
+            is FahrenheitFormatStrategy -> "Фаренгейт"
+            is KelvinFormatStrategy -> "Кельвин"
+            else -> "Цельсий"
+        }
+        updateTemperatureDisplay()
     }
 
-    private fun updateCityInfo(cityName: String){
-        val type = when(cityName){
-            "Минск" -> "Средний"
-            "Москва" -> "Большой"
-            "Казань" -> "Средний"
-            else -> "Малый"
-        }
-        (cityType as MutableLiveData).value = type
+    private fun updateCityInfo(city: City) {
+        (cityType as MutableLiveData<String>).value = city.type
     }
 
-    private fun updateTemperatureInfo(cityName: String?, seasonName: String){
-        val averageTemp = when(seasonName){
-            "Лето" -> 25.3
-            else -> 0.0
+    private fun updateTemperatureInfo(city: City?, seasonName: String) {
+        city?.let {
+            viewModelScope.launch {
+                val temperatures = temperatureDao.getTemperaturesByCityAndSeason(it.id, seasonName)
+                val averageTemp = temperatureCalculator.calculateAverageTemperature(temperatures.map { temp -> temp.temperature })
+                _averageTemperature.value = averageTemp
+                updateTemperatureDisplay()
+                temperatureCalculator.logTemperature(city.name, seasonName, averageTemp)
+            }
         }
-        (averageTemperature as MutableLiveData).value = "$averageTemp°C"
+    }
+
+    private fun updateTemperatureDisplay() {
+        val averageTemp = _averageTemperature.value ?: 0.0
+        val currentFormat = _temperatureFormat.value ?: CelsiusFormatStrategy() // Используйте текущий формат или установите значение по умолчанию
+        (averageTemperature as MutableLiveData<String>).value = currentFormat.formatTemperature(averageTemp)
+    }
+
+
+
+    private fun loadSeasonsForCity(cityId: Int) {
+        viewModelScope.launch {
+            val temperatures = temperatureDao.getTemperaturesByCity(cityId)
+            val seasonsList = temperatures.map { it.season }.distinct()
+            _seasons.value = seasonsList
+        }
+    }
+
+    private fun resetSeasonSelection() {
+        _selectedSeason.value = ""
+        (averageTemperature as MutableLiveData<String>).value = "Средняя температура"
+    }
+
+    fun addCity(cityName: String, cityType: String) {
+        if (cityName.isBlank()) {
+            Toast.makeText(context, "Имя города не может быть пустым", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (cityType.isBlank()) {
+            Toast.makeText(context, "Тип города не может быть пустым", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            val city = City(name = cityName, type = cityType)
+            cityDao.insertCity(city)
+            loadCities()
+        }
+    }
+
+    fun addTemperature(cityName: String, month: String, temperature: Double) {
+        if (cityName.isBlank()) {
+            Toast.makeText(context, "Имя города не может быть пустым", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (temperature !in -50.0..50.0) {
+            Toast.makeText(context, "Температура должна быть в диапазоне от -50 до 50", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (month !in listOf(Month.ЯНВАРЬ, Month.ФЕВРАЛЬ, Month.МАРТ, Month.АПРЕЛЬ, Month.МАЙ, Month.ИЮНЬ, Month.ИЮЛЬ, Month.АВГУСТ, Month.СЕНТЯБРЬ, Month.ОКТЯБРЬ, Month.НОЯБРЬ, Month.ДЕКАБРЬ)) {
+            Toast.makeText(context, "Недопустимый месяц", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        viewModelScope.launch {
+            val city = cityDao.getCityByName(cityName)
+            if (city != null) {
+                val season = when (month) {
+                    Month.ДЕКАБРЬ, Month.ЯНВАРЬ, Month.ФЕВРАЛЬ -> Season.ЗИМА
+                    Month.МАРТ, Month.АПРЕЛЬ, Month.МАЙ -> Season.ВЕСНА
+                    Month.ИЮНЬ, Month.ИЮЛЬ, Month.АВГУСТ -> Season.ЛЕТО
+                    Month.СЕНТЯБРЬ, Month.ОКТЯБРЬ, Month.НОЯБРЬ -> Season.ОСЕНЬ
+                    else -> ""
+                }
+                val temp = Temperature(cityId = city.id, month = month, temperature = temperature, season = season)
+                temperatureDao.insertTemperature(temp)
+                updateTemperatureInfo(city, month)
+            }
+        }
+    }
+
+
+
+    fun deleteCity(city: City) {
+        viewModelScope.launch {
+            cityDao.deleteCity(city)
+            loadCities()
+        }
+    }
+
+
+
+    fun updateTemperature(cityName: String, seasonName: String, month: String, temperature: Double) {
+        viewModelScope.launch {
+            val city = cityDao.getCityByName(cityName)
+            if (city != null) {
+                val temp = Temperature(cityId = city.id, month = month, temperature = temperature, season = seasonName)
+                temperatureDao.updateTemperature(temp)
+                updateTemperatureInfo(city, seasonName)
+            }
+        }
+    }
+
+    suspend fun getAverageTemperatureBySeason(cityId: Int, season: String): Double {
+        return withContext(Dispatchers.IO) {
+            val temperatures = temperatureDao.getTemperaturesByCityAndSeason(cityId, season)
+            temperatures.map { it.temperature }.average()
+        }
+    }
+    // Метод для предварительного заполнения базы данных
+    fun prefillDatabase() {
+        viewModelScope.launch {
+            if (cityDao.getAllCities().isEmpty()) {
+                val cities = listOf(
+                    City(name = "Москва", type = "Большой"),
+                    City(name = "Санкт-Петербург", type = "Большой"),
+                    City(name = "Новосибирск", type = "Средний")
+                )
+
+                cities.forEach { city ->
+                    cityDao.insertCity(city)
+                }
+
+                // Получаем обновленный список городов с их идентификаторами
+                val updatedCities = cityDao.getAllCities()
+
+                updatedCities.forEach { city ->
+                    val temperatures = listOf(
+                        Temperature(cityId = city.id, month = "Январь", temperature = -10.0 + Math.random() * 5, season = "Зима"),
+                        Temperature(cityId = city.id, month = "Февраль", temperature = -5.0 + Math.random() * 5, season = "Зима"),
+                        Temperature(cityId = city.id, month = "Март", temperature = 0.0 + Math.random() * 5, season = "Весна"),
+                        Temperature(cityId = city.id, month = "Апрель", temperature = 10.0 + Math.random() * 5, season = "Весна"),
+                        Temperature(cityId = city.id, month = "Май", temperature = 15.0 + Math.random() * 5, season = "Весна"),
+                        Temperature(cityId = city.id, month = "Июнь", temperature = 20.0 + Math.random() * 5, season = "Лето"),
+                        Temperature(cityId = city.id, month = "Июль", temperature = 25.0 + Math.random() * 5, season = "Лето"),
+                        Temperature(cityId = city.id, month = "Август", temperature = 22.0 + Math.random() * 5, season = "Лето"),
+                        Temperature(cityId = city.id, month = "Сентябрь", temperature = 17.0 + Math.random() * 5, season = "Осень"),
+                        Temperature(cityId = city.id, month = "Октябрь", temperature = 10.0 + Math.random() * 5, season = "Осень"),
+                        Temperature(cityId = city.id, month = "Ноябрь", temperature = 5.0 + Math.random() * 5, season = "Осень"),
+                        Temperature(cityId = city.id, month = "Декабрь", temperature = -5.0 + Math.random() * 5, season = "Зима")
+                    )
+                    temperatures.forEach { temperature ->
+                        temperatureDao.insertTemperature(temperature)
+                    }
+                }
+
+                loadCities()
+            }
+        }
     }
 }
+

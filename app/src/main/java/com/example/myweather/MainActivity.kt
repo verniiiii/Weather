@@ -5,177 +5,358 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.Observer
+import androidx.navigation.NavController
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.myweather.strategy.CelsiusFormatStrategy
+import com.example.myweather.strategy.FahrenheitFormatStrategy
+import com.example.myweather.strategy.KelvinFormatStrategy
+import com.example.myweather.viewmodel.SettingsViewModel
 import com.example.myweather.viewmodel.WeatherViewModel
+import com.google.accompanist.pager.ExperimentalPagerApi
+import com.google.accompanist.pager.HorizontalPager
+import com.google.accompanist.pager.HorizontalPagerIndicator
+import com.google.accompanist.pager.rememberPagerState
+import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
+
+
+val LocalNavController = compositionLocalOf<NavHostController> { error("No NavController provided") }
 
 class MainActivity : ComponentActivity() {
 
-    private val viewModel: WeatherViewModel by viewModels()
+    private val weatherViewModel: WeatherViewModel by viewModels()
+    private val settingsViewModel: SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val navHostController = rememberNavController()
-            WeatherNavHost(navHostController, this, viewModel)
+            WeatherNavHost(owner = this, viewModel = weatherViewModel)
+        }
+
+        // Предварительное заполнение базы данных
+        weatherViewModel.prefillDatabase()
+    }
+}
+
+@Composable
+fun WeatherNavHost(owner: LifecycleOwner, viewModel: WeatherViewModel) {
+    val navController = rememberNavController()
+    CompositionLocalProvider(LocalNavController provides navController) {
+        NavHost(navController, startDestination = "weather") {
+            composable("weather") { WeatherScreen(viewModel, owner, navController) }
+            composable("settings") { SettingsScreen(viewModel, owner) }
         }
     }
 }
 
-@Composable
-fun WeatherNavHost(navHostController: NavHostController, owner: LifecycleOwner, viewModel: WeatherViewModel){
-    NavHost(navHostController, startDestination = "weather") {
-        composable("weather") { WeatherScreen(viewModel, owner, navHostController) }
-        composable("settings") { SettingsScreen(viewModel) }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPagerApi::class)
 @Composable
-fun WeatherScreen(viewModel: WeatherViewModel, owner: LifecycleOwner, navHostController: NavHostController) {
-    val cities = listOf("Минск", "Москва", "Казань")
-    val seasons = listOf("Весна", "Лето", "Осень", "Зима")
+fun WeatherScreen(viewModel: WeatherViewModel, owner: LifecycleOwner, navController: NavController) {
+    val cities by viewModel.cities.observeAsState(emptyList())
+    val seasons by viewModel.seasons.observeAsState(emptyList())
+    val selectedSeason by viewModel.selectedSeason.observeAsState("")
+    val selectedCity by viewModel.selectedCity.observeAsState(null)
 
-    var selectedCity by remember { mutableStateOf(cities[0]) }
-    var selectedSeason by remember { mutableStateOf(seasons[0]) }
     var isCityExpanded by remember { mutableStateOf(false) }
     var isSeasonExpanded by remember { mutableStateOf(false) }
+    var visibleSeason = remember { MutableTransitionState(false) }
 
-    //Переменные состояния для хранения значений из ViewModel
-    var cityType by remember { mutableStateOf("Тип города") }
-    var averageTemperature by remember { mutableStateOf("Средняя температура") }
+    val cityType by viewModel.cityType.observeAsState("Тип города")
+    val averageTemperature by viewModel.averageTemperature.observeAsState("Средняя температура")
+    val selectedFormat by viewModel.selectedTemperatureFormat.observeAsState("Цельсий")
 
-    //Устанавливает наблюдателей при запуске приложения
-    LaunchedEffect(Unit) {
-        viewModel.cityType.observe(owner, Observer { type ->
-            cityType = type
-        })
-        viewModel.averageTemperature.observe(owner, Observer { temp ->
-            averageTemperature = temp
-        })
+    val temperatureFormats = listOf("Цельсий", "Фаренгейт", "Кельвин")
+    val pagerState = rememberPagerState()
+    val coroutineScope = rememberCoroutineScope()
+
+    // Отслеживание изменений состояния pagerState
+    LaunchedEffect(pagerState.currentPage) {
+        val format = temperatureFormats[pagerState.currentPage]
+        when (format) {
+            "Цельсий" -> viewModel.setTemperatureFormat(CelsiusFormatStrategy())
+            "Фаренгейт" -> viewModel.setTemperatureFormat(FahrenheitFormatStrategy())
+            "Кельвин" -> viewModel.setTemperatureFormat(KelvinFormatStrategy())
+        }
     }
 
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Top,
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp)
+            .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.secondaryContainer
+                    )
+                )
+            )
     ) {
-        Text(
-            text = "Выберите город и сезон:",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-
-        Box(
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Top,
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp)
-        ){
-            ExposedDropdownMenuBox(
-                expanded = isCityExpanded,
-                onExpandedChange = {isCityExpanded = !isCityExpanded}
-            ) {
-                TextField(
-                    value = selectedCity,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = {ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCityExpanded)},
-                    modifier = Modifier.menuAnchor() //привязываем меню к этому текстовому полю
-                )
+                .fillMaxSize()
+                .padding(16.dp)
+                .animateContentSize()
+        ) {
+            Text(
+                text = "Выберите город и сезон:",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.padding(bottom = 24.dp)
+            )
 
-                ExposedDropdownMenu(
-                    expanded = isCityExpanded,
-                    onDismissRequest = {isCityExpanded = false}
+            // Выбор города с анимацией
+            AnimatedVisibility(
+                visible = true
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    cities.forEach{city ->
-                        DropdownMenuItem(
-                            text = { Text(text = city) },
+                    ExposedDropdownMenuBox(
+                        expanded = isCityExpanded,
+                        onExpandedChange = { isCityExpanded = !isCityExpanded }
+                    ) {
+                        TextField(
+                            value = selectedCity?.name ?: "",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Выберите город") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCityExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = TextFieldDefaults.textFieldColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                                unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = isCityExpanded,
+                            onDismissRequest = { isCityExpanded = false }
+                        ) {
+                            cities.forEach { city ->
+                                DropdownMenuItem(
+                                    text = { Text(text = city.name) },
+                                    onClick = {
+                                        viewModel.selectCity(city.name)
+                                        isCityExpanded = false
+                                        visibleSeason.targetState = true
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Выбор сезона с анимацией
+            AnimatedVisibility(
+                visibleState = visibleSeason,
+                enter = slideInHorizontally() + expandHorizontally(expandFrom = Alignment.End)
+                        + fadeIn(),
+                exit = slideOutHorizontally(targetOffsetX = { fullWidth -> fullWidth })
+                        + shrinkHorizontally() + fadeOut(),
+            ) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    ExposedDropdownMenuBox(
+                        expanded = isSeasonExpanded,
+                        onExpandedChange = { isSeasonExpanded = !isSeasonExpanded }
+                    ) {
+                        TextField(
+                            value = selectedSeason,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Выберите сезон") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSeasonExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(),
+                            shape = MaterialTheme.shapes.medium,
+                            colors = TextFieldDefaults.textFieldColors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                                focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+                                unfocusedIndicatorColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                        )
+
+                        ExposedDropdownMenu(
+                            expanded = isSeasonExpanded,
+                            onDismissRequest = { isSeasonExpanded = false }
+                        ) {
+                            seasons.forEach { season ->
+                                DropdownMenuItem(
+                                    text = { Text(text = season) },
+                                    onClick = {
+                                        viewModel.selectSeason(season)
+                                        isSeasonExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Отображение типа города
+            if (selectedCity != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Тип города: $cityType",
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+
+            // Отображение средней температуры
+            if (selectedCity != null && selectedSeason.isNotBlank()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Средняя температура: $averageTemperature",
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            } else if (selectedCity != null && selectedSeason.isBlank()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text(
+                        text = "Пожалуйста, выберите сезон",
+                        fontSize = 20.sp,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Горизонтальный список для выбора формата температуры
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                HorizontalPager(
+                    count = temperatureFormats.size,
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 64.dp),
+                    itemSpacing = (-128).dp // Overlap items
+                ) { page ->
+                    val format = temperatureFormats[page]
+                    val isSelected = format == selectedFormat
+                    val offset = ((pagerState.currentPage - page) + pagerState.currentPageOffset).absoluteValue
+                    val scale = 1f - (0.2f * offset)
+                    val alpha = 1f - (0.5f * offset)
+
+                    Box(
+                        modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = scale
+                                scaleY = scale
+                                this.alpha = alpha
+                            }
+                    ) {
+                        TemperatureButton(
+                            label = format,
+                            selected = isSelected,
                             onClick = {
-                                selectedCity = city
-                                viewModel.selectCity(city) //Обновляем выбранный город в ViewModel
-                                isCityExpanded = false
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(page)
+                                }
+                                when (format) {
+                                    "Цельсий" -> viewModel.setTemperatureFormat(CelsiusFormatStrategy())
+                                    "Фаренгейт" -> viewModel.setTemperatureFormat(FahrenheitFormatStrategy())
+                                    "Кельвин" -> viewModel.setTemperatureFormat(KelvinFormatStrategy())
+                                }
                             }
                         )
                     }
                 }
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(32.dp)
-        ){
-            ExposedDropdownMenuBox(
-                expanded = isSeasonExpanded,
-                onExpandedChange = {isSeasonExpanded = !isSeasonExpanded}
-            ) {
-                TextField(
-                    value = selectedSeason,
-                    onValueChange = {},
-                    readOnly = true,
-                    trailingIcon = {ExposedDropdownMenuDefaults.TrailingIcon(expanded = isSeasonExpanded)},
-                    modifier = Modifier.menuAnchor() //привязываем меню к этому текстовому полю
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = { navController.navigate("settings") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 )
-
-                ExposedDropdownMenu(
-                    expanded = isSeasonExpanded,
-                    onDismissRequest = {isSeasonExpanded = false}
-                ) {
-                    seasons.forEach{season ->
-                        DropdownMenuItem(
-                            text = { Text(text = season) },
-                            onClick = {
-                                selectedSeason = season
-                                viewModel.selectSeason(season) //Обновляем выбор сезона в ViewModel
-                                isSeasonExpanded = false
-                            }
-                        )
-                    }
-                }
+            ) {
+                Text("Настройки", fontSize = 18.sp)
             }
-        }
-        Spacer(modifier = Modifier.height(32.dp))
-
-        //Отображение средней температуры и типа города в пользовательском интерфейсе
-        Text(text = "Тип города: $cityType", fontSize = 18.sp)
-        Text(text = "Средняя температура: $averageTemperature", fontSize = 18.sp)
-
-        TextButton(onClick = { navHostController.navigate("settings") }) {
-            Text("Настройки")
         }
     }
 }
-
