@@ -1,6 +1,8 @@
 package com.example.myweather.viewmodel
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Location
 import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LiveData
@@ -23,6 +25,7 @@ import com.example.myweather.strategy.CelsiusFormatStrategy
 import com.example.myweather.strategy.FahrenheitFormatStrategy
 import com.example.myweather.strategy.KelvinFormatStrategy
 import com.example.myweather.strategy.TemperatureFormatStrategy
+import com.google.android.gms.location.FusedLocationProviderClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -290,5 +293,8 @@ class WeatherViewModel(private val context: Context,
             }
         }
     }
+
+
+
 }
 

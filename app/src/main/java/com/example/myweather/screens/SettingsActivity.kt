@@ -57,13 +57,18 @@ import android.annotation.SuppressLint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.motionEventSpy
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.navigation.NavController
+import com.example.myweather.R
 
 import com.example.myweather.network.GeocoderRepository
 import com.google.accompanist.pager.HorizontalPager
@@ -155,48 +160,31 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
                     itemsIndexed(cities) { index, city ->
                         val visibleState = remember { MutableTransitionState(false) }
                         LaunchedEffect(Unit) {
-                            delay(100 * index.toLong()) // Задержка для создания эффекта "лесенки"
+                            delay(100 * index.toLong()) // Задержка для анимации
                             visibleState.targetState = true
                         }
 
                         AnimatedVisibility(
                             visibleState = visibleState,
                             enter = slideInHorizontally(animationSpec = tween(durationMillis = 500)) +
-                                    expandHorizontally(expandFrom = Alignment.Start) +
                                     fadeIn(animationSpec = tween(durationMillis = 500)),
                             exit = slideOutHorizontally(animationSpec = tween(durationMillis = 500)) +
-                                    shrinkHorizontally(shrinkTowards = Alignment.Start) +
                                     fadeOut(animationSpec = tween(durationMillis = 500))
                         ) {
-                            Card(
+                            CityCard(
+                                city = city,
+                                onDelete = {
+                                    cityToDelete = city
+                                    showDeleteConfirmation = true
+                                },
+                                onEdit = {
+                                    selectedCity = city
+                                    showBottomSheet = true
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 8.dp),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(text = city.name, fontSize = 18.sp)
-                                    Text(text = city.type, fontSize = 18.sp)
-                                    IconButton(onClick = {
-                                        cityToDelete = city
-                                        showDeleteConfirmation = true
-                                    }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete")
-                                    }
-                                    IconButton(onClick = {
-                                        selectedCity = city
-                                        showBottomSheet = true
-                                    }) {
-                                        Icon(Icons.Default.Edit, contentDescription = "Edit")
-                                    }
-                                }
-                            }
+                                    .padding(vertical = 8.dp)
+                            )
                         }
                     }
                 }
@@ -390,280 +378,9 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
 
 
 
-@Composable
-fun AddTemperatureDialog(
-    onDismiss: () -> Unit,
-    onSave: (season: String, temperatures: Map<String, Double>) -> Unit
-) {
-    var selectedSeason by remember { mutableStateOf("") }
-    var isMenuExpanded by remember { mutableStateOf(false) }
-    val seasons = listOf(Season.ВЕСНА, Season.ЛЕТО, Season.ОСЕНЬ, Season.ЗИМА)
-    val seasonMonths = mapOf(
-        Season.ВЕСНА to listOf(Month.МАРТ, Month.АПРЕЛЬ, Month.МАЙ),
-        Season.ЛЕТО to listOf(Month.ИЮНЬ, Month.ИЮЛЬ, Month.АВГУСТ),
-        Season.ОСЕНЬ to listOf(Month.СЕНТЯБРЬ, Month.ОКТЯБРЬ, Month.НОЯБРЬ),
-        Season.ЗИМА to listOf(Month.ДЕКАБРЬ, Month.ЯНВАРЬ, Month.ФЕВРАЛЬ)
-    )
-    val temperatures = remember { mutableStateMapOf<String, Double>() }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Добавить температуру") },
-        text = {
-            Column {
-                ExposedDropdownMenuBox(
-                    expanded = isMenuExpanded,
-                    onExpandedChange = { isMenuExpanded = !isMenuExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = selectedSeason,
-                        onValueChange = { selectedSeason = it },
-                        readOnly = true,
-                        label = { Text("Выберите сезон") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(
-                                expanded = isMenuExpanded
-                            )
-                        }
-                    )
-                    ExposedDropdownMenu(
-                        expanded = isMenuExpanded,
-                        onDismissRequest = { isMenuExpanded = false }
-                    ) {
-                        seasons.forEach { season ->
-                            DropdownMenuItem(
-                                text = { Text(season) },
-                                onClick = {
-                                    selectedSeason = season
-                                    isMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                selectedSeason.takeIf { it.isNotEmpty() }?.let { season ->
-                    seasonMonths[season]?.forEach { month ->
-                        var temp by remember(month) { mutableStateOf("") }
-                        TextField(
-                            value = temp,
-                            onValueChange = {
-                                temp = it
-                                temperatures[month] = it.toDoubleOrNull() ?: 0.0
-                            },
-                            label = { Text(month) },
-                            keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onSave(selectedSeason, temperatures)
-                onDismiss()
-            }) {
-                Text("Сохранить")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
-        }
-    )
-}
 
 
 
 
 
-@Composable
-fun AddCityDialog(
-    onDismiss: () -> Unit,
-    onSave: (cityName: String, cityType: String) -> Unit
-) {
-    var cityName by remember { mutableStateOf("") }
-    var cityType by remember { mutableStateOf("") }
-    var showError by remember { mutableStateOf(false) }
-    var isCityTypeMenuExpanded by remember { mutableStateOf(false) }
-    val context = LocalContext.current
-    val fusedLocationClient: FusedLocationProviderClient =
-        remember { LocationServices.getFusedLocationProviderClient(context) }
-    val coroutineScope = rememberCoroutineScope()
-    val geocoderRepository = GeocoderRepository()
 
-    val cityTypes = listOf("Большой", "Средний", "Маленький")
-
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
-            coroutineScope.launch {
-                getCurrentLocation(fusedLocationClient) { location ->
-                    location?.let {
-                        coroutineScope.launch {
-                            val cityNameResult = geocoderRepository.fetchCityInfo(it.latitude, it.longitude)
-                            cityName = cityNameResult
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Добавить город",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-        },
-        text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedTextField(
-                    value = cityName,
-                    onValueChange = {
-                        if (it.all { char -> char.isLetter() || char.isWhitespace() }) {
-                            cityName = it
-                        }
-                    },
-                    label = { Text("Название города") },
-                    modifier = Modifier.fillMaxWidth(),
-                    isError = showError && cityName.isEmpty(),
-                    keyboardOptions = KeyboardOptions.Default.copy(
-                        keyboardType = KeyboardType.Text,
-                        capitalization = KeyboardCapitalization.Words
-                    )
-                )
-                if (showError && cityName.isEmpty()) {
-                    Text(
-                        text = "Пожалуйста, введите название города",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 16.dp)
-                    )
-                }
-
-                ExposedDropdownMenuBox(
-                    expanded = isCityTypeMenuExpanded,
-                    onExpandedChange = { isCityTypeMenuExpanded = !isCityTypeMenuExpanded }
-                ) {
-                    OutlinedTextField(
-                        value = cityType,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Тип города") },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(),
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(
-                                expanded = isCityTypeMenuExpanded
-                            )
-                        },
-                        isError = showError && cityType.isEmpty()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = isCityTypeMenuExpanded,
-                        onDismissRequest = { isCityTypeMenuExpanded = false }
-                    ) {
-                        cityTypes.forEach { type ->
-                            DropdownMenuItem(
-                                text = { Text(type) },
-                                onClick = {
-                                    cityType = type
-                                    isCityTypeMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-                if (showError && cityType.isEmpty()) {
-                    Text(
-                        text = "Пожалуйста, выберите тип города",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(start = 16.dp)
-                    )
-                }
-
-                Button(
-                    modifier = Modifier.padding(top = 8.dp).fillMaxWidth(),
-                    onClick = {
-                        if (ActivityCompat.checkSelfPermission(
-                                context,
-                                Manifest.permission.ACCESS_FINE_LOCATION
-                            ) == PackageManager.PERMISSION_GRANTED
-                        ) {
-                            coroutineScope.launch {
-                                getCurrentLocation(fusedLocationClient) { location ->
-                                    location?.let {
-                                        coroutineScope.launch {
-                                            val cityNameResult = geocoderRepository.fetchCityInfo(it.latitude, it.longitude)
-                                            cityName = cityNameResult
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Icon(Icons.Default.LocationOn, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Использовать текущую геолокацию")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                if (cityName.isEmpty() || cityType.isEmpty()) {
-                    showError = true
-                } else {
-                    onSave(cityName, cityType)
-                    onDismiss()
-                }
-            }) {
-                Text("Сохранить", color = MaterialTheme.colorScheme.primary)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена", color = MaterialTheme.colorScheme.error)
-            }
-        }
-    )
-}
-
-
-
-@SuppressLint("MissingPermission")
-suspend fun getCurrentLocation(
-    fusedLocationClient: FusedLocationProviderClient,
-    onLocationReceived: (Location?) -> Unit
-) {
-    withContext(Dispatchers.IO) {
-        Log.d("фигня", "зашли2")
-        fusedLocationClient.lastLocation
-            .addOnSuccessListener { location: Location? ->
-                location?.let {
-                    Log.d("Location", "Latitude: ${it.latitude}, Longitude: ${it.longitude}")
-                }
-                onLocationReceived(location)
-            }
-            .addOnFailureListener { e ->
-                Log.e("Location", "Error getting location", e)
-            }
-    }
-}
