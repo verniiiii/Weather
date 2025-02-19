@@ -24,4 +24,7 @@ interface CityDao {
 
     @Query("SELECT * FROM cities WHERE name = :cityName")
     suspend fun getCityByName(cityName: String): City?
+
+    @Query("SELECT * FROM cities WHERE id = :cityId")
+    suspend fun getCityById(cityId: Int): City?
 }

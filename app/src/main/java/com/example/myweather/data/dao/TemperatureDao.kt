@@ -1,5 +1,6 @@
 package com.example.myweather.data.dao
 
+import androidx.lifecycle.LiveData
 import androidx.room.Dao
 import androidx.room.Delete
 import androidx.room.Insert
@@ -23,4 +24,8 @@ interface TemperatureDao {
 
     @Query("SELECT * FROM temperatures WHERE cityId = :cityId")
     suspend fun getTemperaturesByCity(cityId: Int): List<Temperature>
+
+
+    @Query("SELECT * FROM temperatures WHERE cityId = :cityId AND month = :month")
+    suspend fun getTemperature(cityId: Int, month: String): Temperature?
 }

@@ -41,6 +41,10 @@ import com.example.myweather.strategy.CelsiusFormatStrategy
 import com.example.myweather.strategy.FahrenheitFormatStrategy
 import com.example.myweather.strategy.KelvinFormatStrategy
 import com.example.myweather.viewmodel.WeatherViewModel
+import com.example.myweather.constants.Month
+import com.example.myweather.constants.Season
+
+
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
 import kotlinx.coroutines.Dispatchers
@@ -56,11 +60,16 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.motionEventSpy
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.navigation.NavController
+
 import com.example.myweather.network.GeocoderRepository
+import com.google.accompanist.pager.HorizontalPager
+import com.google.accompanist.pager.rememberPagerState
 import org.tensorflow.lite.support.label.Category
+import kotlin.math.absoluteValue
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -73,6 +82,12 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
     var cityToDelete by remember { mutableStateOf<City?>(null) }
     val temperatureFormat by viewModel.temperatureFormat.observeAsState()
 
+    val selectedFormat by viewModel.selectedTemperatureFormat.observeAsState("Цельсий")
+
+    val temperatureFormats = listOf("Цельсий", "Фаренгейт", "Кельвин")
+    val pagerState = rememberPagerState()
+    val coroutineScope = rememberCoroutineScope()
+
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -80,6 +95,16 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
 
     val seasons = listOf("Весна", "Лето", "Осень", "Зима")
     val averageTemperatures = remember { mutableStateMapOf<String, Double>() }
+
+    // Отслеживание изменений состояния pagerState
+    LaunchedEffect(pagerState.currentPage) {
+        val format = temperatureFormats[pagerState.currentPage]
+        when (format) {
+            "Цельсий" -> viewModel.setTemperatureFormat(CelsiusFormatStrategy())
+            "Фаренгейт" -> viewModel.setTemperatureFormat(FahrenheitFormatStrategy())
+            "Кельвин" -> viewModel.setTemperatureFormat(KelvinFormatStrategy())
+        }
+    }
 
     LaunchedEffect(selectedCity, temperatureFormat) {
         if (selectedCity != null) {
@@ -187,62 +212,120 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
                         onDismissRequest = {
                             showBottomSheet = false
                         },
-                        sheetState = sheetState
+                        sheetState = sheetState,
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 8.dp,
+                        scrimColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)
                     ) {
                         Column(
-                            modifier = Modifier.padding(16.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp)
                         ) {
                             Text(
                                 text = "Город: ${selectedCity!!.name}",
                                 fontSize = 20.sp,
                                 fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
-                            Row(
-                                horizontalArrangement = Arrangement.SpaceEvenly,
-                                modifier = Modifier.fillMaxWidth()
+
+                            // Горизонтальный список для выбора формата температуры
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(100.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                TemperatureButton(
-                                    label = "Цельсий",
-                                    selected = temperatureFormat == CelsiusFormatStrategy(),
-                                    onClick = { viewModel.setTemperatureFormat(CelsiusFormatStrategy()) }
-                                )
-                                TemperatureButton(
-                                    label = "Фаренгейт",
-                                    selected = temperatureFormat == FahrenheitFormatStrategy(),
-                                    onClick = { viewModel.setTemperatureFormat(FahrenheitFormatStrategy()) }
-                                )
-                                TemperatureButton(
-                                    label = "Кельвин",
-                                    selected = temperatureFormat == KelvinFormatStrategy(),
-                                    onClick = { viewModel.setTemperatureFormat(KelvinFormatStrategy()) }
-                                )
+                                HorizontalPager(
+                                    count = temperatureFormats.size,
+                                    state = pagerState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(horizontal = 64.dp),
+                                    itemSpacing = (-128).dp // Overlap items
+                                ) { page ->
+                                    val format = temperatureFormats[page]
+                                    val isSelected = format == selectedFormat
+                                    val offset =
+                                        ((pagerState.currentPage - page) + pagerState.currentPageOffset).absoluteValue
+                                    val scale = 1f - (0.2f * offset)
+                                    val alpha = 1f - (0.5f * offset)
+
+                                    Box(
+                                        modifier = Modifier
+                                            .graphicsLayer {
+                                                scaleX = scale
+                                                scaleY = scale
+                                                this.alpha = alpha
+                                            }
+                                    ) {
+                                        TemperatureButton(
+                                            label = format,
+                                            selected = isSelected,
+                                            onClick = {
+                                                coroutineScope.launch {
+                                                    pagerState.animateScrollToPage(page)
+                                                }
+                                                when (format) {
+                                                    "Цельсий" -> viewModel.setTemperatureFormat(
+                                                        CelsiusFormatStrategy()
+                                                    )
+
+                                                    "Фаренгейт" -> viewModel.setTemperatureFormat(
+                                                        FahrenheitFormatStrategy()
+                                                    )
+
+                                                    "Кельвин" -> viewModel.setTemperatureFormat(
+                                                        KelvinFormatStrategy()
+                                                    )
+                                                }
+                                            }
+                                        )
+                                    }
+                                }
                             }
+
                             Text(
-                                text = "Времена года:",
+                                text = "Средняя температура по сезонам:",
                                 fontSize = 18.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(bottom = 8.dp)
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(vertical = 8.dp)
                             )
+
                             Column {
                                 seasons.forEach { season ->
                                     val avgTemp = averageTemperatures[season] ?: 0.0
-                                    val formattedTemp = temperatureFormat?.formatTemperature(avgTemp) ?: "N/A"
-                                    Text(text = "$season: Средняя температура - $formattedTemp")
+                                    val formattedTemp = temperatureFormat?.formatTemperature(avgTemp) ?: "Н/Д"
+                                    Text(
+                                        text = "$season: $formattedTemp",
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(vertical = 4.dp)
+                                    )
                                 }
                             }
-                            Button(onClick = {
-                                scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                    if (!sheetState.isVisible) {
-                                        showBottomSheet = false
-                                    }
-                                }
-                            }) {
-                                Text("Скрыть нижнюю панель")
+
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Button(
+                                onClick = { showAddTemperatureDialog = true },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) {
+                                Text("Добавить температуру")
                             }
                         }
                     }
                 }
+
+
+
 
                 if (showAddCityDialog) {
                     AddCityDialog(
@@ -255,12 +338,23 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
 
                 if (showAddTemperatureDialog && selectedCity != null) {
                     AddTemperatureDialog(
-                        onDismiss = { showAddTemperatureDialog = false },
-                        onSave = { month, temperature ->
-                            viewModel.addTemperature(selectedCity!!.name, month, temperature)
-                        }
+                        onDismiss = { showAddTemperatureDialog = false
+                            showBottomSheet = false
+                            selectedCity = null},
+                        onSave = { season, temperatures ->
+                            // Передаем имя города, сезон и карту температур для сохранения
+                            temperatures.forEach { (month, temperature) ->
+                                viewModel.addTemperature(selectedCity!!.name, month, temperature)
+
+                            }
+
+                        },
                     )
+
+
                 }
+
+
 
                 if (showDeleteConfirmation && cityToDelete != null) {
                     AlertDialog(
@@ -299,32 +393,77 @@ fun SettingsScreen(viewModel: WeatherViewModel = viewModel(), owner: LifecycleOw
 @Composable
 fun AddTemperatureDialog(
     onDismiss: () -> Unit,
-    onSave: (month: String, temperature: Double) -> Unit
+    onSave: (season: String, temperatures: Map<String, Double>) -> Unit
 ) {
-    var month by remember { mutableStateOf("") }
-    var temperature by remember { mutableStateOf("") }
+    var selectedSeason by remember { mutableStateOf("") }
+    var isMenuExpanded by remember { mutableStateOf(false) }
+    val seasons = listOf(Season.ВЕСНА, Season.ЛЕТО, Season.ОСЕНЬ, Season.ЗИМА)
+    val seasonMonths = mapOf(
+        Season.ВЕСНА to listOf(Month.МАРТ, Month.АПРЕЛЬ, Month.МАЙ),
+        Season.ЛЕТО to listOf(Month.ИЮНЬ, Month.ИЮЛЬ, Month.АВГУСТ),
+        Season.ОСЕНЬ to listOf(Month.СЕНТЯБРЬ, Month.ОКТЯБРЬ, Month.НОЯБРЬ),
+        Season.ЗИМА to listOf(Month.ДЕКАБРЬ, Month.ЯНВАРЬ, Month.ФЕВРАЛЬ)
+    )
+    val temperatures = remember { mutableStateMapOf<String, Double>() }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Добавить температуру") },
         text = {
             Column {
-                TextField(
-                    value = month,
-                    onValueChange = { month = it },
-                    label = { Text("Месяц") }
-                )
-                TextField(
-                    value = temperature,
-                    onValueChange = { temperature = it },
-                    label = { Text("Температура") },
-                    keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
-                )
+                ExposedDropdownMenuBox(
+                    expanded = isMenuExpanded,
+                    onExpandedChange = { isMenuExpanded = !isMenuExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = selectedSeason,
+                        onValueChange = { selectedSeason = it },
+                        readOnly = true,
+                        label = { Text("Выберите сезон") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(
+                                expanded = isMenuExpanded
+                            )
+                        }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = isMenuExpanded,
+                        onDismissRequest = { isMenuExpanded = false }
+                    ) {
+                        seasons.forEach { season ->
+                            DropdownMenuItem(
+                                text = { Text(season) },
+                                onClick = {
+                                    selectedSeason = season
+                                    isMenuExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                selectedSeason.takeIf { it.isNotEmpty() }?.let { season ->
+                    seasonMonths[season]?.forEach { month ->
+                        var temp by remember(month) { mutableStateOf("") }
+                        TextField(
+                            value = temp,
+                            onValueChange = {
+                                temp = it
+                                temperatures[month] = it.toDoubleOrNull() ?: 0.0
+                            },
+                            label = { Text(month) },
+                            keyboardOptions = KeyboardOptions.Default.copy(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(month, temperature.toDoubleOrNull() ?: 0.0)
+                onSave(selectedSeason, temperatures)
                 onDismiss()
             }) {
                 Text("Сохранить")
@@ -337,6 +476,10 @@ fun AddTemperatureDialog(
         }
     )
 }
+
+
+
+
 
 @Composable
 fun AddCityDialog(

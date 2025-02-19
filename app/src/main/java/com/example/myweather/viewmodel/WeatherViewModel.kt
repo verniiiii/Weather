@@ -1,10 +1,13 @@
 package com.example.myweather.viewmodel
 
 import android.content.Context
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.map
+import androidx.lifecycle.switchMap
 import androidx.lifecycle.viewModelScope
 import com.example.myweather.data.City
 import com.example.myweather.data.dao.CityDao
@@ -61,6 +64,8 @@ class WeatherViewModel(private val context: Context,
         //temperatureDao = db.temperatureDao()
         loadCities()
     }
+
+
 
     private fun loadCities() {
         viewModelScope.launch {
@@ -128,11 +133,17 @@ class WeatherViewModel(private val context: Context,
 
     private fun loadSeasonsForCity(cityId: Int) {
         viewModelScope.launch {
-            val temperatures = temperatureDao.getTemperaturesByCity(cityId)
-            val seasonsList = temperatures.map { it.season }.distinct()
-            _seasons.value = seasonsList
+            val city = cityDao.getCityById(cityId)
+            if (city != null) {
+                val temperatures = temperatureDao.getTemperaturesByCity(cityId)
+                val seasonsList = temperatures.map { it.season }.distinct()
+                _seasons.value = seasonsList
+            } else {
+                Log.e("WeatherViewModel", "Город с id $cityId не найден.")
+            }
         }
     }
+
 
     private fun resetSeasonSelection() {
         _selectedSeason.value = ""
@@ -183,12 +194,27 @@ class WeatherViewModel(private val context: Context,
                     Month.СЕНТЯБРЬ, Month.ОКТЯБРЬ, Month.НОЯБРЬ -> Season.ОСЕНЬ
                     else -> ""
                 }
-                val temp = Temperature(cityId = city.id, month = month, temperature = temperature, season = season)
-                temperatureDao.insertTemperature(temp)
+
+                // Проверяем, существует ли уже запись с таким городом и месяцем
+                val existingTemperature = temperatureDao.getTemperature(city.id, month)
+
+                if (existingTemperature != null) {
+                    // Если температура уже существует, обновляем её
+                    val updatedTemp = existingTemperature.copy(temperature = temperature, season = season)
+                    temperatureDao.updateTemperature(updatedTemp)
+                    Log.d("TemperatureLogger", "Температура для города ${city.name} в месяце $month обновлена на $temperature")
+                } else {
+                    // Если температуры нет, добавляем новую
+                    val temp = Temperature(cityId = city.id, month = month, temperature = temperature, season = season)
+                    temperatureDao.insertTemperature(temp)
+                    Log.d("TemperatureLogger", "Температура для города ${city.name} в месяце $month добавлена: $temperature")
+                }
+
                 updateTemperatureInfo(city, month)
             }
         }
     }
+
 
 
 
@@ -201,23 +227,28 @@ class WeatherViewModel(private val context: Context,
 
 
 
-    fun updateTemperature(cityName: String, seasonName: String, month: String, temperature: Double) {
-        viewModelScope.launch {
-            val city = cityDao.getCityByName(cityName)
-            if (city != null) {
-                val temp = Temperature(cityId = city.id, month = month, temperature = temperature, season = seasonName)
-                temperatureDao.updateTemperature(temp)
-                updateTemperatureInfo(city, seasonName)
-            }
-        }
-    }
+
 
     suspend fun getAverageTemperatureBySeason(cityId: Int, season: String): Double {
         return withContext(Dispatchers.IO) {
+            // Получаем список температур для указанного города и сезона
             val temperatures = temperatureDao.getTemperaturesByCityAndSeason(cityId, season)
-            temperatures.map { it.temperature }.average()
+
+            // Логируем каждую температуру для проверки
+            temperatures.forEach { temp ->
+                Log.d("TemperatureLogger", "Месяц: ${temp.month}, Температура: ${temp.temperature}")
+            }
+
+            // Рассчитываем среднюю температуру
+            val averageTemp = temperatures.map { it.temperature }.average()
+
+            // Логируем результат средней температуры
+            Log.d("TemperatureLogger", "Средняя температура для города с id $cityId и сезона $season: $averageTemp")
+
+            return@withContext averageTemp
         }
     }
+
     // Метод для предварительного заполнения базы данных
     fun prefillDatabase() {
         viewModelScope.launch {
